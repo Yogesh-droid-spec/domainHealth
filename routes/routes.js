@@ -34,7 +34,7 @@ const axios = require('axios');
 // }
 
 // Function to fetch BIMI record for a domain with error logging and a timeout
-async function fetchBimiRecord(domain, timeoutMs = 1000) {
+async function fetchBimiRecord(domain, timeoutMs = 3000) {
   return new Promise(async (resolve) => {
     const timer = setTimeout(() => {
       console.log('DNS query timed out for', domain);
@@ -42,9 +42,18 @@ async function fetchBimiRecord(domain, timeoutMs = 1000) {
     }, timeoutMs);
 
     try {
-      const bimiRecord = await dns.promises.resolveTxt(`default._bimi.${domain}`);
+      const bimiRecords = await dns.promises.resolveTxt(`default._bimi.${domain}`);
       clearTimeout(timer);
-      resolve(bimiRecord);
+
+      
+      
+
+      if (bimiRecords) {
+        resolve(bimiRecords);
+      } else {
+        console.error(`BIMI Record not found for ${domain}`);
+        resolve([]);
+      }
     } catch (error) {
       clearTimeout(timer);
       if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
@@ -60,6 +69,7 @@ async function fetchBimiRecord(domain, timeoutMs = 1000) {
     }
   });
 }
+
 
 async function checkDomainBlacklist(domain, blocklistArray) {
   return new Promise((resolve, reject) => {
@@ -521,12 +531,12 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           nameServers,
           aRecords,
           aaaaRecords,
-          // discoveredSubdomains,
+          discoveredSubdomains,
           blacklistResult,
           blocklistResult,
           bimiRecord,
             dkimRecords,
-            // isDomainForwarded,
+            isDomainForwarded,
         ] = await Promise.all([
           fetchMxRecords(domain),
           fetchSpfRecords(domain),
@@ -536,18 +546,18 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           fetchNameServers(domain),
           fetchARecords(domain),
           fetchAAAARecords(domain),
-          // discoverSubdomains(domain),
+          discoverSubdomains(domain),
           checkDomainBlacklist(domain,blacklist), 
           checkDomainBlacklist(domain,blocklist), 
           fetchBimiRecord(domain),
            fetchAllDkimRecords(domain, selectors),
-          //  checkDomainForwarding(domain)
+           checkDomainForwarding(domain)
         ]);
    
-    // const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
+    const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
 
 
-    // const forwardedDomain = isForwarded ? isDomainForwarded : '';
+    const forwardedDomain = isForwarded ? isDomainForwarded : '';
         console.log("Domain Processed😎😁😊😊😎");
         return {
           domain,
@@ -563,12 +573,12 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           tlsRptRecords: commonInfo.tlsRptRecords,
           aRecords,
           aaaaRecords,
-          // discoveredSubdomains,
+          discoveredSubdomains,
           blacklistResult,
           blocklistResult,
           bimiRecord,
            dkimRecords,
-          //  forwardedDomain,
+           forwardedDomain,
         };
       
       })
@@ -590,3 +600,4 @@ router.get('/hello', (req, res) => {
 
 
 module.exports = router;
+
