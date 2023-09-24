@@ -23,5 +23,8 @@
     "puppeteer": "^21.3.3",
     "stream": "^0.0.2",
     "whois-json": "^2.0.4"
-  }
+  },
+  "engines": {
+  "node": "16.x"
+}
 }
