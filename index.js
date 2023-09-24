@@ -21,13 +21,13 @@ if (cluster.isMaster) {
   const routes = require('./routes/routes');
   const app = express();
 
-  const port = 3000; // Specify the port you want to use
+  const PORT = process.env.PORT || 3030;
 
   app.enable('trust proxy');
   app.use(express.json());
   app.use('/api', routes);
 
-  app.listen(port, () => {
-    console.log(`Worker ${process.pid} is running on port ${port}`);
+  app.listen(PORT, () => {
+    console.log(`Worker ${process.pid} is running on port ${PORT}`);
   });
 }
