@@ -240,9 +240,9 @@ async function fetchCommonDomainInfo(domain) {
   } catch (error) {
     console.log("dinfo fetches error");
     return{
-      '',
-      ' ',
-      ' '
+     httpSupported:'',
+      httpsSupported:' ',
+      tlsRptRecords:' '
     }
     throw error;
   }
