@@ -9,28 +9,29 @@ const fs = require('fs');
 const stream = require('stream');
 const { log } = require('console');
 const axios = require('axios');
-const puppeteer = require('puppeteer')
+
 
 
 // Function to capture website screenshot 
- async function captureScreenshotAndUpload(url) {
-   try {
-     const browser = await puppeteer.launch({
-      headless:'new',
-       args:[
-           '--no-sandbox'
-      ]
-  });
-   const page = (await browser.pages())[0];
-   await page.goto(url);
- const bs64 = await page.screenshot({ encoding:'base64' });
-  await browser.close()
-  return bs64;
-  } catch (error) {
-    console.error('Error capturing screenshot', error);
-     throw error;
-  }
-}
+// async function captureScreenshotAndUpload(url) {
+//   try {
+//     const browser = await puppeteer.launch({
+//       headless:'new',
+//       args:[
+//           '--no-sandbox'
+//       ]
+//   });
+
+//   const page = (await browser.pages())[0];
+//   await page.goto(url,{timeout:5000});
+//  const bs64 = await page.screenshot({ encoding:'base64' });
+//   await browser.close()
+//   return bs64;
+//   } catch (error) {
+//     console.error('Error capturing screenshot', error);
+//     throw error;
+//   }
+// }
 
 // Function to fetch BIMI record for a domain with error logging and a timeout
 async function fetchBimiRecord(domain, timeoutMs = 3000) {
@@ -55,44 +56,40 @@ async function fetchBimiRecord(domain, timeoutMs = 3000) {
       }
     } catch (error) {
       clearTimeout(timer);
-      resolve([]);
+      if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+        console.error(`BIMI Record not found for ${domain}`);
+        resolve([]);
+      } else if (error.code === 'ESERVFAIL') {
+        console.error(`DNS resolution error for ${domain}: Server failure`);
+        resolve([]);
+      } else {
+        console.error('Error fetching BIMI Record for', domain, error.message);
+        resolve([]);
+      }
     }
   });
 }
 
 
-async function checkDomainBlacklist(domain, blocklistArray, timeoutMs = 1000) {
+async function checkDomainBlacklist(domain, blocklistArray) {
   return new Promise((resolve, reject) => {
     const uribl = new lookup.uribl([domain], blocklistArray);
     const result = {};
-    let timedOut = false; // Flag to track if a timeout occurred
-
-    // Handle errors during the blacklist check
+    console.log("domain blacklist!! check");
     uribl.on('error', function (err, bl) {
       console.error(`Error checking blocklist ${bl} for ${domain}: ${err}`);
     });
 
-    // Handle data received from the blacklist check
     uribl.on('data', function (response, bl) {
       result[bl] = response;
     });
 
-    // Handle completion of the blacklist check
     uribl.on('done', function () {
-      if (!timedOut) {
-        // If the check completed before the timeout, resolve with the result
-        resolve(result);
-      }
+      resolve(result); // Resolve with the result when done
     });
-
-    // Set a timeout for the blacklist check
-    setTimeout(() => {
-      timedOut = true;
-      
-      reject(new Error(`Timeout exceeded (${timeoutMs}ms) while checking domain blacklist for ${domain}`));
-    }, timeoutMs);
   });
 }
+
 
 
 // Function to fetch DKIM records for a domain with a specific selector
@@ -118,7 +115,12 @@ async function fetchDkimRecords(domain, selector) {
 
     return dkimRecords;
   } catch (error) {
-    return [];
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; // Return an empty array if DKIM records are not found (ENOTFOUND)
+    } else {
+     return [];
+      throw error; // Throw other DNS resolution errors
+    }
   }
 }
 
@@ -152,7 +154,15 @@ async function fetchAllDkimRecords(domain, selector) {
 
     return dkimRecords;
   } catch (error) {
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; 
+    } else if (error.code === 'ESERVFAIL') {
+      console.error(`DNS resolution error : Server failure`);
+      return []; 
+    } else {
      return [];
+      throw error; 
+    }
   }
 }
 
@@ -163,7 +173,13 @@ async function fetchMxRecords(domain) {
     console.log("MX fetching success!!");
     return mxRecords;
   } catch (error) {
-    return [];
+    if (error.code === 'ENODATA'||error.code==='ENOTFOUND') {
+      console.log("MX fetching error!!");
+      return []; // Return an empty array if MX records are not found (ENOTFOUND)
+    } else {
+     return[];
+      throw error; // Throw other DNS resolution errors
+    }
   }
 }
 
@@ -175,7 +191,15 @@ async function fetchSpfRecords(domain) {
     console.log("SPF Fetching!!");
     return spfRecords;
   } catch (error) {
-     return [];
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; 
+    } else if (error.code === 'ESERVFAIL') {
+      console.error(`DNS resolution error : Server failure`);
+      return []; 
+    } else {
+     return[];
+      throw error;
+    }
   }
 }
 
@@ -187,7 +211,15 @@ async function fetchDmarcRecords(domain) {
     console.log("DMARC fetching!!");
     return txtRecords;
   } catch (error) {
-    return [];
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
+    } else if (error.code === 'ESERVFAIL') {
+      console.error(`DNS resolution error for : Server failure`);
+      return []; // Handle ESERVFAIL error gracefully
+    } else {
+       return [];
+      throw error; // Throw other DNS resolution errors
+    }
   }
 }
 
@@ -206,11 +238,8 @@ async function fetchCommonDomainInfo(domain) {
       tlsRptRecords
     };
   } catch (error) {
-    return {
-      httpSupported:'',
-      httpsSupported:'',
-      tlsRptRecords:''
-    }
+    console.log("dinfo fetches error");
+    throw error;
   }
 }
 
@@ -273,11 +302,28 @@ async function checkDomainForwarding(domain) {
     }
   } catch (error) {
     console.error(`Error checking domain forwarding for ${domain}: ${error.message}`);
-    return  {
-      isForwarding: false,
-    };
     
-    
+    if (error.response) {
+      // If there's a response in the error, check the status code
+      if (error.response.status === 405) {
+        // Handle 405 (Method Not Allowed) error
+        return {
+          isForwarding: false,
+        };
+      } else {
+        // Handle other HTTP error status codes
+        return {
+          isForwarding: false,
+          error: `HTTP error: ${error.response.status}`,
+        };
+      }
+    } else {
+      // Handle network errors or timeouts
+      return {
+        isForwarding: false,
+        error: `Network error: ${error.message}`,
+      };
+    }
   }
 }
 
@@ -293,7 +339,15 @@ async function fetchTlsRptRecord(domain) {
     console.log("TLs success!!");
     return records;
   } catch (error) {
-    return [];
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
+    } else if (error.code === 'ESERVFAIL') {
+      console.error(`DNS resolution error : Server failure`);
+      return []; // Handle ESERVFAIL error gracefully
+    } else {
+     return [];
+      throw error; // Throw other DNS resolution errors
+    }
   }
 }
 
@@ -309,15 +363,60 @@ async function fetchDomainInfoWithTimeout(domain, timeoutMs = 3000) {
     ]);
   } catch (error) {
     console.error(`Error fetching domain info for ${domain}: ${error.message}`);
-    return {
-      registrar: '',
-      creationDate: '',
-      ageInDays: '',
-      error: `Error fetching domain info: ${error.message}`,
-    };
+    if (error.message === 'Domain info fetch timed out') {
+      return {
+        registrar: '',
+        creationDate: '',
+        ageInDays: '',
+        error: `Domain info fetch for ${domain} timed out. Please try again later.`,
+      };
+    } else if (error.code === 'ECONNRESET') {
+      return {
+        registrar: '',
+        creationDate: '',
+        ageInDays: '',
+        error: `Connection reset while fetching domain info for ${domain}. Please try again later.`,
+      };
+    } else {
+      return {
+        registrar: '',
+        creationDate: '',
+        ageInDays: '',
+        error: `Error fetching domain info: ${error.message}`,
+      };
+    }
   }
 }
 
+async function fetchDomainInfo(domain) {
+  try {
+    const whoisData = await whois(domain);
+
+    const creationDate = whoisData.creationDate;
+    const registrar = whoisData.registrar;
+
+    if (!creationDate || !registrar) {
+      return {
+        registrar: '',
+        creationDate: '',
+        ageInDays: '',
+      };
+    }
+
+    // Calculate domain age
+    const currentDate = new Date();
+    const ageInMilliseconds = currentDate - new Date(creationDate);
+    const ageInDays = Math.floor(ageInMilliseconds / (1000 * 60 * 60 * 24));
+
+    return {
+      registrar: registrar,
+      creationDate: creationDate,
+      ageInDays: ageInDays,
+    };
+  } catch (error) {
+    throw error;
+  }
+}
 
 // Function to perform a name server (NS) lookup for a domain
 async function fetchNameServers(domain) {
@@ -334,7 +433,15 @@ async function fetchNameServers(domain) {
     console.log("ns fetching success");
     return nameServers;
   } catch (error) {
-     return [];
+    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
+      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
+    } else if (error.code === 'ESERVFAIL') {
+      console.error(`DNS resolution error : Server failure`);
+      return []; // Handle ESERVFAIL error gracefully
+    } else {
+     return[];
+      throw error; // Throw other DNS resolution errors
+    }
   }
 }
 
@@ -384,7 +491,7 @@ async function discoverSubdomains(domain) {
         discoveredSubdomains.push(aaaaSubdomain);
       }
     } catch (error) {
-      return [];
+      
     }
   }
  console.log("subdomain check!!");
@@ -437,7 +544,6 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           bimiRecord,
             dkimRecords,
             isDomainForwarded,
-            // b64
         ] = await Promise.all([
           fetchMxRecords(domain),
           fetchSpfRecords(domain),
@@ -452,8 +558,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           checkDomainBlacklist(domain,blocklist), 
           fetchBimiRecord(domain),
            fetchAllDkimRecords(domain, selectors),
-           checkDomainForwarding(domain),
-          //  captureScreenshotAndUpload(`http://${domain}`),
+           checkDomainForwarding(domain)
         ]);
    
     const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
@@ -481,7 +586,6 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           bimiRecord,
            dkimRecords,
            forwardedDomain,
-          //  b64
         };
       
       })
