@@ -536,7 +536,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           blocklistResult,
           bimiRecord,
             dkimRecords,
-            isDomainForwarded,
+            // isDomainForwarded,
         ] = await Promise.all([
           fetchMxRecords(domain),
           fetchSpfRecords(domain),
@@ -551,7 +551,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           checkDomainBlacklist(domain,blocklist), 
           fetchBimiRecord(domain),
            fetchAllDkimRecords(domain, selectors),
-           checkDomainForwarding(domain)
+           // checkDomainForwarding(domain)
         ]);
    
     const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
@@ -578,7 +578,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           blocklistResult,
           bimiRecord,
            dkimRecords,
-           forwardedDomain,
+           // forwardedDomain,
         };
       
       })
