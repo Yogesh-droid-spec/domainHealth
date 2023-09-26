@@ -118,6 +118,7 @@ async function fetchDkimRecords(domain, selector) {
     if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
       return []; // Return an empty array if DKIM records are not found (ENOTFOUND)
     } else {
+      return [];
       throw error; // Throw other DNS resolution errors
     }
   }
@@ -159,6 +160,7 @@ async function fetchAllDkimRecords(domain, selector) {
       console.error(`DNS resolution error : Server failure`);
       return []; 
     } else {
+      return [];
       throw error; 
     }
   }
@@ -175,6 +177,7 @@ async function fetchMxRecords(domain) {
       console.log("MX fetching error!!");
       return []; // Return an empty array if MX records are not found (ENOTFOUND)
     } else {
+      return [];
       throw error; // Throw other DNS resolution errors
     }
   }
@@ -194,6 +197,7 @@ async function fetchSpfRecords(domain) {
       console.error(`DNS resolution error : Server failure`);
       return []; 
     } else {
+      return [];
       throw error;
     }
   }
@@ -213,6 +217,7 @@ async function fetchDmarcRecords(domain) {
       console.error(`DNS resolution error for : Server failure`);
       return []; // Handle ESERVFAIL error gracefully
     } else {
+      return [];
       throw error; // Throw other DNS resolution errors
     }
   }
@@ -234,6 +239,11 @@ async function fetchCommonDomainInfo(domain) {
     };
   } catch (error) {
     console.log("dinfo fetches error");
+    return{
+      '',
+      ' ',
+      ' '
+    }
     throw error;
   }
 }
@@ -340,6 +350,7 @@ async function fetchTlsRptRecord(domain) {
       console.error(`DNS resolution error : Server failure`);
       return []; // Handle ESERVFAIL error gracefully
     } else {
+      return [];
       throw error; // Throw other DNS resolution errors
     }
   }
@@ -408,6 +419,11 @@ async function fetchDomainInfo(domain) {
       ageInDays: ageInDays,
     };
   } catch (error) {
+     return {
+        registrar: '',
+        creationDate: '',
+        ageInDays: '',
+      };
     throw error;
   }
 }
@@ -433,6 +449,7 @@ async function fetchNameServers(domain) {
       console.error(`DNS resolution error : Server failure`);
       return []; // Handle ESERVFAIL error gracefully
     } else {
+      return [];
       throw error; // Throw other DNS resolution errors
     }
   }
@@ -526,7 +543,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           mxRecords,
           spfRecords,
           dmarcRecords,
-          // commonInfo,
+          commonInfo,
           domainInfo,
           nameServers,
           aRecords,
@@ -536,12 +553,12 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           blocklistResult,
           bimiRecord,
             dkimRecords,
-            // isDomainForwarded,
+            isDomainForwarded,
         ] = await Promise.all([
           fetchMxRecords(domain),
           fetchSpfRecords(domain),
           fetchDmarcRecords(domain),
-          // fetchCommonDomainInfo(domain),
+           fetchCommonDomainInfo(domain),
           fetchDomainInfoWithTimeout(domain),
           fetchNameServers(domain),
           fetchARecords(domain),
@@ -551,13 +568,13 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           checkDomainBlacklist(domain,blocklist), 
           fetchBimiRecord(domain),
            fetchAllDkimRecords(domain, selectors),
-           // checkDomainForwarding(domain)
+           checkDomainForwarding(domain)
         ]);
    
-    // const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
+    const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
 
 
-    // const forwardedDomain = isForwarded ? isDomainForwarded : '';
+    const forwardedDomain = isForwarded ? isDomainForwarded : '';
         console.log("Domain Processed😎😁😊😊😎");
         return {
           domain,
@@ -568,9 +585,9 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           creationDate: domainInfo.creationDate,
           ageInDays: domainInfo.ageInDays,
           nameServers: nameServers,
-          // httpSupported: commonInfo.httpSupported,
-          // httpsSupported: commonInfo.httpsSupported,
-          // tlsRptRecords: commonInfo.tlsRptRecords,
+          httpSupported: commonInfo.httpSupported,
+          httpsSupported: commonInfo.httpsSupported,
+          tlsRptRecords: commonInfo.tlsRptRecords,
           aRecords,
           aaaaRecords,
           discoveredSubdomains,
@@ -578,7 +595,7 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
           blocklistResult,
           bimiRecord,
            dkimRecords,
-           // forwardedDomain,
+           forwardedDomain,
         };
       
       })
