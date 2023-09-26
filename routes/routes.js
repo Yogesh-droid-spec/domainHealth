@@ -554,10 +554,10 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
            // checkDomainForwarding(domain)
         ]);
    
-    const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
+    // const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
 
 
-    const forwardedDomain = isForwarded ? isDomainForwarded : '';
+    // const forwardedDomain = isForwarded ? isDomainForwarded : '';
         console.log("Domain Processed😎😁😊😊😎");
         return {
           domain,
