@@ -9,32 +9,32 @@ const fs = require('fs');
 const stream = require('stream');
 const { log } = require('console');
 const axios = require('axios');
-
+const puppeteer = require('puppeteer')
 
 
 // Function to capture website screenshot 
-// async function captureScreenshotAndUpload(url) {
-//   try {
-//     const browser = await puppeteer.launch({
-//       headless:'new',
-//       args:[
-//           '--no-sandbox'
-//       ]
-//   });
+ async function captureScreenshotAndUpload(url) {
+   try {
+     const browser = await puppeteer.launch({
+      headless:'new',
+       args:[
+           '--no-sandbox'
+      ]
+  });
+   const page = (await browser.pages())[0];
+   await page.goto(url);
+ const bs64 = await page.screenshot({ encoding:'base64' });
+  await browser.close()
+  return bs64;
+  } catch (error) {
+    console.error('Error capturing screenshot', error);
+     throw error;
+  }
+}
 
-//   const page = (await browser.pages())[0];
-//   await page.goto(url,{timeout:5000});
-//  const bs64 = await page.screenshot({ encoding:'base64' });
-//   await browser.close()
-//   return bs64;
-//   } catch (error) {
-//     console.error('Error capturing screenshot', error);
-//     throw error;
-//   }
-// }
 
 // Function to fetch BIMI record for a domain with error logging and a timeout
-async function fetchBimiRecord(domain, timeoutMs = 3000) {
+async function fetchBimiRecord(domain, timeoutMs = 4000) {
   return new Promise(async (resolve) => {
     const timer = setTimeout(() => {
       console.log('DNS query timed out for', domain);
@@ -45,10 +45,7 @@ async function fetchBimiRecord(domain, timeoutMs = 3000) {
       const bimiRecords = await dns.promises.resolveTxt(`default._bimi.${domain}`);
       clearTimeout(timer);
 
-      
-      
-
-      if (bimiRecords) {
+      if (bimiRecords.length > 0) {
         resolve(bimiRecords);
       } else {
         console.error(`BIMI Record not found for ${domain}`);
@@ -56,72 +53,42 @@ async function fetchBimiRecord(domain, timeoutMs = 3000) {
       }
     } catch (error) {
       clearTimeout(timer);
-      if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-        console.error(`BIMI Record not found for ${domain}`);
-        resolve([]);
-      } else if (error.code === 'ESERVFAIL') {
-        console.error(`DNS resolution error for ${domain}: Server failure`);
-        resolve([]);
-      } else {
-        console.error('Error fetching BIMI Record for', domain, error.message);
-        resolve([]);
-      }
+      resolve([]);
     }
   });
 }
 
-
-async function checkDomainBlacklist(domain, blocklistArray) {
+async function checkDomainBlacklist(domain, blocklistArray, timeoutMs) {
   return new Promise((resolve, reject) => {
     const uribl = new lookup.uribl([domain], blocklistArray);
     const result = {};
-    console.log("domain blacklist!! check");
+    let timedOut = false; // Flag to track if a timeout occurred
+
+    // Handle errors during the blacklist check
     uribl.on('error', function (err, bl) {
       console.error(`Error checking blocklist ${bl} for ${domain}: ${err}`);
     });
 
+    // Handle data received from the blacklist check
     uribl.on('data', function (response, bl) {
       result[bl] = response;
     });
 
+    // Handle completion of the blacklist check
     uribl.on('done', function () {
-      resolve(result); // Resolve with the result when done
+      if (!timedOut) {
+        // If the check completed before the timeout, resolve with the result
+        resolve(result);
+      }
     });
+
+    // Set a timeout for the blacklist check
+    setTimeout(() => {
+      timedOut = true;
+      
+      reject(new Error(`Timeout exceeded (${timeoutMs}ms) while checking domain blacklist for ${domain}`));
+    }, timeoutMs);
   });
-}
-
-
-
-// Function to fetch DKIM records for a domain with a specific selector
-async function fetchDkimRecords(domain, selector) {
-  try {
-    const dkimSubdomain = `${selector}._domainkey.${domain}`;
-    const txtRecords = await dns.promises.resolveTxt(dkimSubdomain);
-
-    // Filter and parse DKIM records (if multiple exist)
-    const dkimRecords = txtRecords
-      .filter(record => record[0].startsWith('v=DKIM1'))
-      .map(record => {
-        const keyValuePairs = record[0].split(';');
-        const dkimRecord = {};
-
-        for (const pair of keyValuePairs) {
-          const [key, value] = pair.split('=');
-          dkimRecord[key.trim()] = value.trim();
-        }
-
-        return dkimRecord;
-      });
-
-    return dkimRecords;
-  } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; // Return an empty array if DKIM records are not found (ENOTFOUND)
-    } else {
-     return [];
-      throw error; // Throw other DNS resolution errors
-    }
-  }
 }
 
 // Function to fetch DKIM records for a domain with a specific selector
@@ -154,15 +121,7 @@ async function fetchAllDkimRecords(domain, selector) {
 
     return dkimRecords;
   } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; 
-    } else if (error.code === 'ESERVFAIL') {
-      console.error(`DNS resolution error : Server failure`);
-      return []; 
-    } else {
      return [];
-      throw error; 
-    }
   }
 }
 
@@ -173,13 +132,7 @@ async function fetchMxRecords(domain) {
     console.log("MX fetching success!!");
     return mxRecords;
   } catch (error) {
-    if (error.code === 'ENODATA'||error.code==='ENOTFOUND') {
-      console.log("MX fetching error!!");
-      return []; // Return an empty array if MX records are not found (ENOTFOUND)
-    } else {
-     return[];
-      throw error; // Throw other DNS resolution errors
-    }
+    return [];
   }
 }
 
@@ -191,15 +144,7 @@ async function fetchSpfRecords(domain) {
     console.log("SPF Fetching!!");
     return spfRecords;
   } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; 
-    } else if (error.code === 'ESERVFAIL') {
-      console.error(`DNS resolution error : Server failure`);
-      return []; 
-    } else {
-     return[];
-      throw error;
-    }
+     return [];
   }
 }
 
@@ -211,44 +156,18 @@ async function fetchDmarcRecords(domain) {
     console.log("DMARC fetching!!");
     return txtRecords;
   } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
-    } else if (error.code === 'ESERVFAIL') {
-      console.error(`DNS resolution error for : Server failure`);
-      return []; // Handle ESERVFAIL error gracefully
-    } else {
-       return [];
-      throw error; // Throw other DNS resolution errors
-    }
+    return [];
   }
 }
 
-// Function to fetch common domain information (HTTP, HTTPS, TLS-RPT, etc.)
-async function fetchCommonDomainInfo(domain) {
-  try {
-    const [httpSupported, httpsSupported, tlsRptRecords] = await Promise.all([
-      checkHttpSupport(domain),
-      checkHttpsSupport(domain),
-      fetchTlsRptRecord(domain)
-    ]);
-     console.log("dinfo fetches");
-    return {
-      httpSupported,
-      httpsSupported,
-      tlsRptRecords
-    };
-  } catch (error) {
-    console.log("dinfo fetches error");
-    throw error;
-  }
-}
 
-// Function to check if HTTP is supported
+
+// Function to check HTTP support for a single domain
 async function checkHttpSupport(domain) {
   try {
-    const response = await axios.head(`http://${domain}`, { timeout: 1500 });
+    const response = await axios.head(`http://${domain}`, { timeout: 5000 });
 
-    if (response.status == 200) {
+    if (response.status === 200) {
       return true; // HTTP is supported
     } else if (response.status === 405) {
       console.warn(`HTTP request error for ${domain}: Method Not Allowed (Status Code 405)`);
@@ -260,131 +179,6 @@ async function checkHttpSupport(domain) {
   } catch (error) {
     console.error(`HTTP request error for ${domain}: ${error.message}`);
     return false;
-  }
-}
-
-// Function to check if HTTPS is supported
-async function checkHttpsSupport(domain) {
-  try {
-    const response = await axios.head(`https://${domain}`, { timeout: 1500 });
-
-    if (response.status >= 200) {
-      return true; // HTTPS is supported
-    } else if (response.status === 405) {
-      console.warn(`HTTPS request error for ${domain}: Method Not Allowed (Status Code 405)`);
-      return false;
-    } else {
-      console.error(`HTTPS request error for ${domain}: Unexpected Status Code ${response.status}`);
-      return false;
-    }
-  } catch (error) {
-    console.error(`HTTPS request error for ${domain}: ${error.message}`);
-    return false;
-  }
-}
-
-async function checkDomainForwarding(domain) {
-  try {
-    const response = await axios.get(`http://${domain}`, {
-      maxRedirects: 0,
-      validateStatus: (status) => status === 301 || status === 302,timeout:1000
-    });
-
-    if (response.headers['location']) {
-      return {
-        isForwarding: true,
-        forwardingTo: response.headers['location'],
-      };
-    } else {
-      return {
-        isForwarding: false,
-      };
-    }
-  } catch (error) {
-    console.error(`Error checking domain forwarding for ${domain}: ${error.message}`);
-    
-    if (error.response) {
-      // If there's a response in the error, check the status code
-      if (error.response.status === 405) {
-        // Handle 405 (Method Not Allowed) error
-        return {
-          isForwarding: false,
-        };
-      } else {
-        // Handle other HTTP error status codes
-        return {
-          isForwarding: false,
-          error: `HTTP error: ${error.response.status}`,
-        };
-      }
-    } else {
-      // Handle network errors or timeouts
-      return {
-        isForwarding: false,
-        error: `Network error: ${error.message}`,
-      };
-    }
-  }
-}
-
-
-
-
-
-// Function to fetch TLS-RPT (TLS Reporting Policy and Trust) records for a domain
-async function fetchTlsRptRecord(domain) {
-  try {
-    const tlsRptSubdomain = '_tlsrpt.' + domain;
-    const records = await dns.promises.resolveTxt(tlsRptSubdomain);
-    console.log("TLs success!!");
-    return records;
-  } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
-    } else if (error.code === 'ESERVFAIL') {
-      console.error(`DNS resolution error : Server failure`);
-      return []; // Handle ESERVFAIL error gracefully
-    } else {
-     return [];
-      throw error; // Throw other DNS resolution errors
-    }
-  }
-}
-
-async function fetchDomainInfoWithTimeout(domain, timeoutMs = 3000) {
-  try {
-    return await Promise.race([
-      fetchDomainInfo(domain),
-      new Promise((_, reject) => {
-        setTimeout(() => {
-          reject(new Error('Domain info fetch timed out'));
-        }, timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    console.error(`Error fetching domain info for ${domain}: ${error.message}`);
-    if (error.message === 'Domain info fetch timed out') {
-      return {
-        registrar: '',
-        creationDate: '',
-        ageInDays: '',
-        error: `Domain info fetch for ${domain} timed out. Please try again later.`,
-      };
-    } else if (error.code === 'ECONNRESET') {
-      return {
-        registrar: '',
-        creationDate: '',
-        ageInDays: '',
-        error: `Connection reset while fetching domain info for ${domain}. Please try again later.`,
-      };
-    } else {
-      return {
-        registrar: '',
-        creationDate: '',
-        ageInDays: '',
-        error: `Error fetching domain info: ${error.message}`,
-      };
-    }
   }
 }
 
@@ -418,31 +212,117 @@ async function fetchDomainInfo(domain) {
   }
 }
 
-// Function to perform a name server (NS) lookup for a domain
-async function fetchNameServers(domain) {
+// Function to check HTTPS support for a single domain
+async function checkHttpsSupport(domain) {
   try {
-    const nameServers = await new Promise((resolve, reject) => {
-      dns.resolveNs(domain, (err, nsRecords) => {
-        if (err) {
-          
-        } else {
-          resolve(nsRecords);
-        }
-      });
-    });
-    console.log("ns fetching success");
-    return nameServers;
-  } catch (error) {
-    if (error.code === 'ENOTFOUND' || error.code === 'ENODATA') {
-      return []; // Return an empty array if DMARC records are not found (ENOTFOUND)
-    } else if (error.code === 'ESERVFAIL') {
-      console.error(`DNS resolution error : Server failure`);
-      return []; // Handle ESERVFAIL error gracefully
+    const response = await axios.head(`https://${domain}`, { timeout: 5000 });
+
+    if (response.status === 200) {
+      return true; // HTTPS is supported
+    } else if (response.status === 405) {
+      console.warn(`HTTPS request error for ${domain}: Method Not Allowed (Status Code 405)`);
+      return false;
     } else {
-     return[];
-      throw error; // Throw other DNS resolution errors
+      console.error(`HTTPS request error for ${domain}: Unexpected Status Code ${response.status}`);
+      return false;
     }
+  } catch (error) {
+    console.error(`HTTPS request error for ${domain}: ${error.message}`);
+    return false;
   }
+}
+
+
+async function checkDomainForwarding(domain) {
+  try {
+    const response = await axios.get(`http://${domain}`, {
+      maxRedirects: 0,
+      validateStatus: (status) => status === 301 || status === 302,timeout:1000
+    });
+
+    if (response.headers['location']) {
+      return {
+        isForwarding: true,
+        forwardingTo: response.headers['location'],
+      };
+    } else {
+      return {
+        isForwarding: false,
+      };
+    }
+  } catch (error) {
+    console.error(`Error checking domain forwarding for ${domain}: ${error.message}`);
+    return  {
+      isForwarding: false,
+    };
+    
+    
+  }
+}
+
+
+
+
+
+// Function to fetch TLS-RPT (TLS Reporting Policy and Trust) records for a domain
+async function fetchTlsRptRecord(domain) {
+  try {
+    const tlsRptSubdomain = '_tlsrpt.' + domain;
+    const records = await dns.promises.resolveTxt(tlsRptSubdomain);
+    console.log("TLs success!!");
+    return records;
+  } catch (error) {
+    return [];
+  }
+}
+
+async function fetchDomainInfoWithTimeout(domain, timeoutMs) {
+  try {
+    return await Promise.race([
+      fetchDomainInfo(domain),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Domain info fetch timed out'));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    console.error(`Error fetching domain info for ${domain}: ${error.message}`);
+    return {
+      registrar: '',
+      creationDate: '',
+      ageInDays: '',
+      error: `Error fetching domain info: ${error.message}`,
+    };
+  }
+}
+
+
+async function fetchNameServersWithTimeout(domain, timeoutMilliseconds) {
+  return new Promise(async (resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      clearTimeout(timeoutId);
+      reject(new Error('Name server lookup timed out.'));
+    }, timeoutMilliseconds);
+
+    try {
+      const nameServers = await new Promise((innerResolve, innerReject) => {
+        dns.resolveNs(domain, (err, nsRecords) => {
+          if (err) {
+            innerReject(err);
+          } else {
+            innerResolve(nsRecords);
+          }
+        });
+      });
+
+      clearTimeout(timeoutId); // Clear the timeout if the lookup succeeded
+      resolve(nameServers);
+    } catch (error) {
+      clearTimeout(timeoutId); // Clear the timeout if an error occurred
+      resolve([]); // Return an empty array if there was an error
+    }
+  });
 }
 
 
@@ -491,15 +371,177 @@ async function discoverSubdomains(domain) {
         discoveredSubdomains.push(aaaaSubdomain);
       }
     } catch (error) {
-      
+      return [];
     }
   }
  console.log("subdomain check!!");
   return discoveredSubdomains;
 }
 
-router.post('/fetch-domains', async (req, res) => {
-  const { domains } = req.body; 
+router.post('/mx',async(req,res)=>{
+  const {domains} = req.body;
+
+  try {
+    const mxRecordsPromises = domains.map((domain) => fetchMxRecords(domain));
+    const mxRecords = await Promise.all(mxRecordsPromises);
+
+    // Combine the domains and their MX records into an array of objects
+    const domainMXPairs = domains.map((domain, index) => ({
+      domain,
+      mxRecords: mxRecords[index],
+    }));
+
+    res.json(domainMXPairs);
+  } catch (error) {
+    console.error(`Error fetching MX records: ${error.message}`);
+    res.status(500).json({ error: 'An error occurred while fetching MX records.' });
+  }
+})
+
+router.post('/spf',async(req,res) => {
+  const {domains} = req.body;
+  try {
+    const spfRecordsPromises = domains.map((domain) => fetchSpfRecords(domain));
+    const spfRecords = await Promise.all(spfRecordsPromises);
+
+    // Combine the domains and their SPF records into an array of objects
+    const domainSPFPairs = domains.map((domain, index) => ({
+      domain,
+      spfRecords: spfRecords[index],
+    }));
+
+    res.json(domainSPFPairs);
+  } catch (error) {
+    console.error(`Error fetching SPF records: ${error.message}`);
+    res.status(500).json({ error: 'An error occurred while fetching SPF records.' });
+  }
+})
+
+router.post('/dmarc',async(req,res)=> {
+  const{domains} = req.body;
+  try {
+    const dmarcRecordsPromises = domains.map((domain) => fetchDmarcRecords(domain));
+    const dmarcRecords = await Promise.all(dmarcRecordsPromises);
+
+    // Combine the domains and their DMARC records into an array of objects
+    const domainDMARCPairs = domains.map((domain, index) => ({
+      domain,
+      dmarcRecords: dmarcRecords[index],
+    }));
+
+    res.json(domainDMARCPairs);
+  } catch (error) {
+    console.error(`Error fetching DMARC records: ${error.message}`);
+    res.status(500).json({ error: 'An error occurred while fetching DMARC records.' });
+  }
+})
+
+router.post('/ns', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const nsRecordsPromises = domains.map((domain) => fetchNameServersWithTimeout(domain, 3000));
+    const nsRecords = await Promise.allSettled(nsRecordsPromises);
+
+    // Process the results of all promises, including both fulfilled and rejected promises
+    const domainNSPairs = nsRecords.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return {
+          domain: domains[index],
+          nsRecords: result.value,
+        };
+      } else {
+        // Handle the error for the rejected promise
+        console.error(`Error fetching NS records for ${domains[index]}: ${result.reason.message}`);
+        return {
+          domain: domains[index],
+          nsRecords: [],
+          error: result.reason.message,
+        };
+      }
+    });
+
+    res.json(domainNSPairs);
+  } catch (error) {
+    console.error(`Error fetching NS records: ${error.message}`);
+    res.status(500).json({ error: 'An error occurred while fetching NS records.' });
+  }
+});
+
+router.post('/subdomains', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const subdomainsArray = [];
+
+    for (const domain of domains) {
+      const subdomains = await discoverSubdomains(domain);
+      subdomainsArray.push({ domain, subdomains });
+    }
+
+    res.json({ subdomainsArray });
+  } catch (error) {
+    console.error('Error fetching subdomains:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for performing the checkhttp operation for an array of domains
+router.post('/checkhttp', async (req, res) => {
+  const { domains } = req.body;
+
+  try {
+    const results = await Promise.all(domains.map(checkHttpSupport));
+    const domainHttpSupportPairs = domains.map((domain, index) => ({
+      domain,
+      httpSupported: results[index],
+    }));
+    
+    res.json({ domainHttpSupportPairs });
+  } catch (error) {
+    console.error('Error performing checkhttp:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for performing the checkhttp operation for an array of domains
+router.post('/checkhttps', async (req, res) => {
+  const { domains } = req.body;
+
+  try {
+    const results = await Promise.all(domains.map(checkHttpsSupport));
+    const domainHttpSupportPairs = domains.map((domain, index) => ({
+      domain,
+      httpSupported: results[index],
+    }));
+    
+    res.json({ domainHttpSupportPairs });
+  } catch (error) {
+    console.error('Error performing checkhttp:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/domainInfo', async (req, res) => {
+  const { domains, timeoutMs } = req.body;
+  try {
+    const domainInfoPromises = domains.map((domain) => fetchDomainInfoWithTimeout(domain,5000));
+    const domainInfoResults = await Promise.all(domainInfoPromises);
+
+    // Combine the domains and their info results into an array of objects
+    const domainInfoPairs = domains.map((domain, index) => ({
+      domain,
+      info: domainInfoResults[index],
+    }));
+
+    res.json({ domainInfoPairs });
+  } catch (error) {
+    console.error('Error fetching domain info:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for performing a blacklist check
+router.post('/blacklist', async (req, res) => {
+  const { domains } = req.body;
 
   try {
     const blacklist = [
@@ -521,85 +563,197 @@ router.post('/fetch-domains', async (req, res) => {
         ,'z.mailspike.net'	,
       'zombie.dnsbl.sorbs.net'		];
 
-
-const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
-      ,'zen.spamhaus.org','b.barracudacentral.org','bl.spamcop.net'
-      ]
-
-      const selectors = ['google']; 
-    const allDomainDetails = await Promise.all(
+    const blacklistResults = await Promise.all(
       domains.map(async (domain) => {
-        const [
-          mxRecords,
-          spfRecords,
-          dmarcRecords,
-          commonInfo,
-          domainInfo,
-          nameServers,
-          aRecords,
-          aaaaRecords,
-          discoveredSubdomains,
-          blacklistResult,
-          blocklistResult,
-          bimiRecord,
-            dkimRecords,
-            isDomainForwarded,
-        ] = await Promise.all([
-          fetchMxRecords(domain),
-          fetchSpfRecords(domain),
-          fetchDmarcRecords(domain),
-          fetchCommonDomainInfo(domain),
-          fetchDomainInfoWithTimeout(domain),
-          fetchNameServers(domain),
-          fetchARecords(domain),
-          fetchAAAARecords(domain),
-          discoverSubdomains(domain),
-          checkDomainBlacklist(domain,blacklist), 
-          checkDomainBlacklist(domain,blocklist), 
-          fetchBimiRecord(domain),
-           fetchAllDkimRecords(domain, selectors),
-           checkDomainForwarding(domain)
-        ]);
-   
-    const isForwarded = isDomainForwarded !== null && isDomainForwarded !== undefined;
-
-
-    const forwardedDomain = isForwarded ? isDomainForwarded : '';
-        console.log("Domain Processed😎😁😊😊😎");
-        return {
-          domain,
-          mxRecords,
-          spfRecords,
-          dmarcRecords,
-          registrar: domainInfo.registrar,
-          creationDate: domainInfo.creationDate,
-          ageInDays: domainInfo.ageInDays,
-          nameServers: nameServers,
-          httpSupported: commonInfo.httpSupported,
-          httpsSupported: commonInfo.httpsSupported,
-          tlsRptRecords: commonInfo.tlsRptRecords,
-          aRecords,
-          aaaaRecords,
-          discoveredSubdomains,
-          blacklistResult,
-          blocklistResult,
-          bimiRecord,
-           dkimRecords,
-           forwardedDomain,
-        };
-      
+        try {
+          const result = await checkDomainBlacklist(domain, blacklist, 6000);
+          return { domain, blacklistResult: result };
+        } catch (error) {
+          // Handle the error for this specific domain
+          console.error(`Error checking blacklist for ${domain}: ${error.message}`);
+          return { domain, blacklistResult: { status: 'error', message: error.message } };
+        }
       })
-   
     );
 
-    res.json(allDomainDetails); // Send the array of domain details as the response
-  }  catch (error) {
-    console.error(`Error processing domain: ${error.message}`);
-    return {
-      error: `Error processing domain: ${error.message}`,
-    };
+    
+
+    res.json({ domainBlacklistPairs: blacklistResults });
+  } catch (error) {
+    console.error('Error checking domain blacklist:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+router.post('/blocklist', async (req, res) => {
+  const { domains } = req.body;
+
+  try {
+    
+const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
+,'zen.spamhaus.org','b.barracudacentral.org','bl.spamcop.net'
+]
+
+    const blocklistResults = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const result = await checkDomainBlacklist(domain, blocklist, 6000);
+          return { domain, blocklistResult: result };
+        } catch (error) {
+          // Handle the error for this specific domain
+          console.error(`Error checking blocklist for ${domain}: ${error.message}`);
+          return { domain, blocklistResult: { status: 'error', message: error.message } };
+        }
+      })
+    );
+
+    
+
+    res.json({ domainBlacklistPairs: blocklistResults });
+  } catch (error) {
+    console.error('Error checking domain blocklist:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for fetching A records
+router.post('/arecords', async (req, res) => {
+  const { domains } = req.body;
+
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return res.status(400).json({ error: 'Domains array is required and should not be empty' });
+  }
+
+  try {
+    const aRecordsResults = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const aRecords = await fetchARecords(domain);
+          return { domain, aRecords };
+        } catch (error) {
+          // Handle the error for this specific domain
+          console.error(`Error fetching A records for ${domain}: ${error.message}`);
+          return { domain, error: error.message };
+        }
+      })
+    );
+
+    res.json({ aRecordsResults });
+  } catch (error) {
+    console.error('Error fetching A records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for fetching AAAA records
+router.post('/aaaRecords', async (req, res) => {
+  const { domains } = req.body;
+
+ 
+
+  try {
+    const aaaaRecordsResults = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const aaaaRecords = await fetchAAAARecords(domain);
+          return { domain, aaaaRecords };
+        } catch (error) {
+          // Handle the error for this specific domain
+          console.error(`Error fetching AAAA records for ${domain}: ${error.message}`);
+          return { domain, error: error.message };
+        }
+      })
+    );
+
+    res.json({ aaaaRecordsResults });
+  } catch (error) {
+    console.error('Error fetching AAAA records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for fetching BIMI records
+router.post('/bimiRecords', async (req, res) => {
+  const { domains } = req.body;
+
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return res.status(400).json({ error: 'Domains array is required and should not be empty' });
+  }
+
+  try {
+    const bimiRecordsResults = await Promise.all(
+      domains.map(async (domain) => {
+        try {
+          const bimiRecords = await fetchBimiRecord(domain);
+          return { domain, bimiRecords };
+        } catch (error) {
+          // Handle the error for this specific domain
+          console.error(`Error fetching BIMI records for ${domain}: ${error.message}`);
+          return { domain, error: error.message };
+        }
+      })
+    );
+
+    res.json({ bimiRecordsResults });
+  } catch (error) {
+    console.error('Error fetching BIMI records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define the route for performing the checkDomainForwarding operation for an array of domains
+router.post('/checkdomainforwarding', async (req, res) => {
+  const { domains } = req.body;
+
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return res.status(400).json({ error: 'Domains array is required and should not be empty' });
+  }
+
+  try {
+    const results = await Promise.all(domains.map(checkDomainForwarding));
+    const domainForwardingPairs = domains.map((domain, index) => ({
+      domain,
+      forwardingInfo: results[index],
+    }));
+
+    res.json({ domainForwardingPairs });
+  } catch (error) {
+    console.error('Error performing checkdomainforwarding:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/dkimRecords', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const dkimRecordsPromises = domains.map((domain) => fetchAllDkimRecords(domain,"google"));
+    const dkimRecordsArray = await Promise.all(dkimRecordsPromises);
+
+    res.json({ dkimRecords: dkimRecordsArray });
+  } catch (error) {
+    console.error('Error fetching DKIM records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/tlsrptRecords', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const tlsRptRecordsPromises = domains.map((domain) => fetchTlsRptRecord(domain));
+    const tlsRptRecordsArray = await Promise.all(tlsRptRecordsPromises);
+
+    const domainTlsRptPairs = domains.map((domain, index) => ({
+      domain,
+      tlsRptRecords: tlsRptRecordsArray[index],
+    }));
+
+    res.json({ domainTlsRptPairs });
+  } catch (error) {
+    console.error('Error fetching TLS-RPT records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 router.get('/hello', (req, res) => {
   res.send('Hello, World!');
