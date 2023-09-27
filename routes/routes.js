@@ -285,14 +285,25 @@ async function checkDomainForwarding(domain) {
 // Function to fetch TLS-RPT (TLS Reporting Policy and Trust) records for a domain
 async function fetchTlsRptRecord(domain) {
   try {
-    const tlsRptSubdomain = '_tlsrpt.' + domain;
+    const tlsRptSubdomain = '_smtp._tls.' + domain;
     const records = await dns.promises.resolveTxt(tlsRptSubdomain);
-    console.log("TLs success!!");
-    return records;
+    // console.log(records);
+    // Check if the records are in the correct format (v=TLSRPTv1)
+    const validRecords = records. filter(record => record[0].includes("v=TLSRPTv1;"));
+     console.log(validRecords);
+    if (validRecords.length > 0) {
+      console.log("TLSRPT records found:", validRecords);
+      return validRecords;
+    } else {
+      console.error("Invalid or missing TLSRPT records for", domain);
+      return [];
+    }
   } catch (error) {
+    console.error(`Error fetching TLSRPT records for ${domain}: ${error.message}`);
     return [];
   }
 }
+
 
 async function fetchDomainInfoWithTimeout(domain, timeoutMs) {
   try {
