@@ -44,11 +44,14 @@ async function fetchBimiRecord(domain, timeoutMs = 4000) {
     try {
       const bimiRecords = await dns.promises.resolveTxt(`default._bimi.${domain}`);
       clearTimeout(timer);
-
-      if (bimiRecords.length > 0) {
-        resolve(bimiRecords);
+       console.log(bimiRecords);
+      // Filter BIMI records that match the "v=BIMI1;" format
+      const validBimiRecords = bimiRecords.filter(record => record[0].includes("v=BIMI1;"));
+      console.log(validBimiRecords);
+      if (validBimiRecords.length > 0) {
+        resolve(validBimiRecords);
       } else {
-        console.error(`BIMI Record not found for ${domain}`);
+        console.error(`Valid BIMI Record not found for ${domain}`);
         resolve([]);
       }
     } catch (error) {
@@ -56,6 +59,21 @@ async function fetchBimiRecord(domain, timeoutMs = 4000) {
       resolve([]);
     }
   });
+}
+
+// Function to fetch MTA-STS records for a domain
+async function fetchMtaSts(domain) {
+  try {
+    const mtaStsSubdomain = `_mta-sts.${domain}`;
+    const txtRecords = await dns.promises.resolveTxt(mtaStsSubdomain);
+    console.log(txtRecords);
+    // Filter MTA-STS records based on the presence of "v=STSv1;"
+    const validMtaStsRecords = txtRecords.filter(record => record[0].includes("v=STSv1;"));
+    console.log(validMtaStsRecords);
+    return validMtaStsRecords;
+  } catch (error) {
+    return [];
+  }
 }
 
 async function checkDomainBlacklist(domain, blocklistArray, timeoutMs) {
@@ -615,6 +633,27 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+router.post('/mtaSts', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const mtaStsResults = await Promise.all(
+      domains.map((domain) => fetchMtaSts(domain))
+    );
+
+    // Combine the domains and their MTA-STS results into an array of objects
+    const domainMtaStsPairs = domains.map((domain, index) => ({
+      domain,
+      mtaStsRecords: mtaStsResults[index],
+    }));
+
+    res.json({ domainMtaStsPairs });
+  } catch (error) {
+    console.error('Error fetching MTA-STS records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 // Define the route for fetching A records
 router.post('/arecords', async (req, res) => {
