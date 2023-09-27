@@ -510,7 +510,7 @@ router.post('/checkhttps', async (req, res) => {
     const results = await Promise.all(domains.map(checkHttpsSupport));
     const domainHttpSupportPairs = domains.map((domain, index) => ({
       domain,
-      httpSupported: results[index],
+      httpsSupported: results[index],
     }));
     
     res.json({ domainHttpSupportPairs });
