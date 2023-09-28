@@ -803,7 +803,10 @@ router.post('/checkdomainforwarding', async (req, res) => {
 router.post('/dkimRecords', async (req, res) => {
   const { domains } = req.body;
   try {
-    const dkimRecordsPromises = domains.map((domain) => fetchAllDkimRecords(domain,"google"));
+    const dkimRecordsPromises = domains.map(async (domain) => {
+      const dkimRecords = await fetchAllDkimRecords(domain, "google");
+      return { domain, dkimRecords }; // Include the domain name in the response
+    });
     const dkimRecordsArray = await Promise.all(dkimRecordsPromises);
 
     res.json({ dkimRecords: dkimRecordsArray });
