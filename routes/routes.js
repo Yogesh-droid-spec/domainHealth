@@ -12,20 +12,20 @@ const axios = require('axios');
 const puppeteer = require('puppeteer')
 const { google } = require('googleapis');
 const { Readable } =  require('stream')
-const chromium = require('chrome-aws-lambda');
-// Load the service account key file (replace with your own key file)
-const serviceAccountKey = require('./secrets.json');
+// const chromium = require('chrome-aws-lambda');
+// // Load the service account key file (replace with your own key file)
+// const serviceAccountKey = require('./secrets.json');
 
-// Create a JWT client using the service account credentials
-const jwtClient = new google.auth.JWT(
-  serviceAccountKey.client_email,
-  null,
-  serviceAccountKey.private_key,
-  ['https://www.googleapis.com/auth/drive']
-);
+// // Create a JWT client using the service account credentials
+// const jwtClient = new google.auth.JWT(
+//   serviceAccountKey.client_email,
+//   null,
+//   serviceAccountKey.private_key,
+//   ['https://www.googleapis.com/auth/drive']
+// );
 
-// Set up the Google Drive API
-const drive = google.drive({ version: 'v3', auth: jwtClient });
+// // Set up the Google Drive API
+// const drive = google.drive({ version: 'v3', auth: jwtClient });
 
 
 async function captureScreenshotAndUpload(url) {
