@@ -326,6 +326,19 @@ async function fetchDomainInfoWithTimeout(domain, timeoutMs) {
   }
 }
 
+// Function to fetch rDNS records for a domain name
+async function fetchRdnsRecords(domainName) {
+  try {
+    const ipAddress = await dns.promises.resolve(domainName);
+    const rdnsRecords = await dns.promises.reverse(ipAddress[0]);
+    console.log(`rDNS records for ${domainName}:`, rdnsRecords);
+    return { domain: domainName, rdnsRecords };
+  } catch (error) {
+    console.error(`Error fetching rDNS records for ${domainName}: ${error.message}`);
+    return { domain: domainName, rdnsRecords: [] };
+  }
+}
+
 
 async function fetchNameServersWithTimeout(domain, timeoutMilliseconds) {
   return new Promise(async (resolve, reject) => {
@@ -564,6 +577,20 @@ router.post('/domainInfo', async (req, res) => {
     res.json({ domainInfoPairs });
   } catch (error) {
     console.error('Error fetching domain info:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define a route to fetch rDNS records
+router.post('/rdns', async (req, res) => {
+  const { domains } = req.body;
+
+
+  try {
+    const rdnsRecords = await Promise.all(domains.map(fetchRdnsRecords));
+    res.json({ rdnsRecords });
+  } catch (error) {
+    console.error(`Error fetching rDNS records: ${error.message}`);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
