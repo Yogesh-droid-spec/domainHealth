@@ -565,7 +565,7 @@ router.post('/checkhttps', async (req, res) => {
 router.post('/domainInfo', async (req, res) => {
   const { domains, timeoutMs } = req.body;
   try {
-    const domainInfoPromises = domains.map((domain) => fetchDomainInfoWithTimeout(domain,5000));
+    const domainInfoPromises = domains.map((domain) => fetchDomainInfoWithTimeout(domain,6000));
     const domainInfoResults = await Promise.all(domainInfoPromises);
 
     // Combine the domains and their info results into an array of objects
