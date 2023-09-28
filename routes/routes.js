@@ -12,7 +12,7 @@ const axios = require('axios');
 const puppeteer = require('puppeteer')
 const { google } = require('googleapis');
 const { Readable } =  require('stream')
-
+const chromium = require('chrome-aws-lambda');
 // Load the service account key file (replace with your own key file)
 const serviceAccountKey = require('./secrets.json');
 
@@ -31,7 +31,11 @@ const drive = google.drive({ version: 'v3', auth: jwtClient });
 async function captureScreenshotAndUpload(url) {
   try {
     // Capture the screenshot using Puppeteer
-    const browser = await puppeteer.launch();
+      browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    });
     const page = await browser.newPage();
     await page.goto(url);
     const screenshotBuffer = await page.screenshot({ encoding: 'basr64' });
