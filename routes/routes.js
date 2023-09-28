@@ -10,25 +10,79 @@ const stream = require('stream');
 const { log } = require('console');
 const axios = require('axios');
 const puppeteer = require('puppeteer')
+const { google } = require('googleapis');
+const { Readable } =  require('stream')
+
+// Load the service account key file (replace with your own key file)
+const serviceAccountKey = require('./secrets.json');
+
+// Create a JWT client using the service account credentials
+const jwtClient = new google.auth.JWT(
+  serviceAccountKey.client_email,
+  null,
+  serviceAccountKey.private_key,
+  ['https://www.googleapis.com/auth/drive']
+);
+
+// Set up the Google Drive API
+const drive = google.drive({ version: 'v3', auth: jwtClient });
 
 
-// Function to capture website screenshot 
- async function captureScreenshotAndUpload(url) {
-   try {
-     const browser = await puppeteer.launch({
-      headless:'new',
-       args:[
-           '--no-sandbox'
-      ]
-  });
-   const page = (await browser.pages())[0];
-   await page.goto(url);
- const bs64 = await page.screenshot({ encoding:'base64' });
-  await browser.close()
-  return bs64;
+async function captureScreenshotAndUpload(url) {
+  try {
+    // Capture the screenshot using Puppeteer
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+    await page.goto(url);
+    const screenshotBuffer = await page.screenshot({ encoding: 'basr64' });
+    await browser.close();
+
+    // Upload the screenshot to Google Drive
+    const fileMetadata = {
+      name: 'screenshot.png', // Change the filename as needed
+    };
+
+    const media = {
+      mimeType: 'image/jpeg', // Change the MIME type as needed
+      body:Readable.from(Buffer.from( screenshotBuffer, 'base64')), 
+    };
+
+    const uploadedFile = await drive.files.create({
+      resource: fileMetadata,
+      media: media,
+      fields: 'id',
+    });
+
+    // Set permissions for the uploaded file
+    const permission = {
+      type: 'anyone',
+      role: 'reader',
+    };
+
+    await drive.permissions.create({
+      fileId: uploadedFile.data.id,
+      requestBody: permission,
+    });
+
+    // Construct the URL of the uploaded image
+    const imageUrl = `https://drive.google.com/uc?id=${uploadedFile.data.id}`;
+
+    return imageUrl;
   } catch (error) {
-    console.error('Error capturing screenshot', error);
-     throw error;
+    console.error('Error capturing and uploading screenshot:', error);
+    return "";
+  }
+}
+// Function to fetch rDNS records for a domain name
+async function fetchRdnsRecords(domainName) {
+  try {
+    const ipAddress = await dns.promises.resolve(domainName);
+    const rdnsRecords = await dns.promises.reverse(ipAddress[0]);
+    console.log(`rDNS records for ${domainName}:`, rdnsRecords);
+    return { domain: domainName, rdnsRecords };
+  } catch (error) {
+    console.error(`Error fetching rDNS records for ${domainName}: ${error.message}`);
+    return { domain: domainName, rdnsRecords: [] };
   }
 }
 
@@ -59,21 +113,6 @@ async function fetchBimiRecord(domain, timeoutMs = 4000) {
       resolve([]);
     }
   });
-}
-
-// Function to fetch MTA-STS records for a domain
-async function fetchMtaSts(domain) {
-  try {
-    const mtaStsSubdomain = `_mta-sts.${domain}`;
-    const txtRecords = await dns.promises.resolveTxt(mtaStsSubdomain);
-    console.log(txtRecords);
-    // Filter MTA-STS records based on the presence of "v=STSv1;"
-    const validMtaStsRecords = txtRecords.filter(record => record[0].includes("v=STSv1;"));
-    console.log(validMtaStsRecords);
-    return validMtaStsRecords;
-  } catch (error) {
-    return [];
-  }
 }
 
 async function checkDomainBlacklist(domain, blocklistArray, timeoutMs) {
@@ -304,7 +343,6 @@ async function fetchTlsRptRecord(domain) {
   }
 }
 
-
 async function fetchDomainInfoWithTimeout(domain, timeoutMs) {
   try {
     return await Promise.race([
@@ -323,19 +361,6 @@ async function fetchDomainInfoWithTimeout(domain, timeoutMs) {
       ageInDays: '',
       error: `Error fetching domain info: ${error.message}`,
     };
-  }
-}
-
-// Function to fetch rDNS records for a domain name
-async function fetchRdnsRecords(domainName) {
-  try {
-    const ipAddress = await dns.promises.resolve(domainName);
-    const rdnsRecords = await dns.promises.reverse(ipAddress[0]);
-    console.log(`rDNS records for ${domainName}:`, rdnsRecords);
-    return { domain: domainName, rdnsRecords };
-  } catch (error) {
-    console.error(`Error fetching rDNS records for ${domainName}: ${error.message}`);
-    return { domain: domainName, rdnsRecords: [] };
   }
 }
 
@@ -418,6 +443,21 @@ async function discoverSubdomains(domain) {
   }
  console.log("subdomain check!!");
   return discoveredSubdomains;
+}
+
+// Function to fetch MTA-STS records for a domain
+async function fetchMtaSts(domain) {
+  try {
+    const mtaStsSubdomain = `_mta-sts.${domain}`;
+    const txtRecords = await dns.promises.resolveTxt(mtaStsSubdomain);
+    console.log(txtRecords);
+    // Filter MTA-STS records based on the presence of "v=STSv1;"
+    const validMtaStsRecords = txtRecords.filter(record => record[0].includes("v=STSv1;"));
+    console.log(validMtaStsRecords);
+    return validMtaStsRecords;
+  } catch (error) {
+    return [];
+  }
 }
 
 router.post('/mx',async(req,res)=>{
@@ -526,6 +566,20 @@ router.post('/subdomains', async (req, res) => {
   }
 });
 
+// Define a route to fetch rDNS records
+router.post('/rdns', async (req, res) => {
+  const { domains } = req.body;
+
+
+  try {
+    const rdnsRecords = await Promise.all(domains.map(fetchRdnsRecords));
+    res.json({ rdnsRecords });
+  } catch (error) {
+    console.error(`Error fetching rDNS records: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Define the route for performing the checkhttp operation for an array of domains
 router.post('/checkhttp', async (req, res) => {
   const { domains } = req.body;
@@ -565,7 +619,7 @@ router.post('/checkhttps', async (req, res) => {
 router.post('/domainInfo', async (req, res) => {
   const { domains, timeoutMs } = req.body;
   try {
-    const domainInfoPromises = domains.map((domain) => fetchDomainInfoWithTimeout(domain,5000));
+    const domainInfoPromises = domains.map((domain) => fetchDomainInfoWithTimeout(domain,6000));
     const domainInfoResults = await Promise.all(domainInfoPromises);
 
     // Combine the domains and their info results into an array of objects
@@ -577,20 +631,6 @@ router.post('/domainInfo', async (req, res) => {
     res.json({ domainInfoPairs });
   } catch (error) {
     console.error('Error fetching domain info:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Define a route to fetch rDNS records
-router.post('/rdns', async (req, res) => {
-  const { domains } = req.body;
-
-
-  try {
-    const rdnsRecords = await Promise.all(domains.map(fetchRdnsRecords));
-    res.json({ rdnsRecords });
-  } catch (error) {
-    console.error(`Error fetching rDNS records: ${error.message}`);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -671,27 +711,6 @@ const blocklist=['pbl.spamhaus.org','sbl.spamhaus.org','xbl.spamhaus.org'
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-router.post('/mtaSts', async (req, res) => {
-  const { domains } = req.body;
-  try {
-    const mtaStsResults = await Promise.all(
-      domains.map((domain) => fetchMtaSts(domain))
-    );
-
-    // Combine the domains and their MTA-STS results into an array of objects
-    const domainMtaStsPairs = domains.map((domain, index) => ({
-      domain,
-      mtaStsRecords: mtaStsResults[index],
-    }));
-
-    res.json({ domainMtaStsPairs });
-  } catch (error) {
-    console.error('Error fetching MTA-STS records:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 
 // Define the route for fetching A records
 router.post('/arecords', async (req, res) => {
@@ -830,6 +849,54 @@ router.post('/tlsrptRecords', async (req, res) => {
     res.json({ domainTlsRptPairs });
   } catch (error) {
     console.error('Error fetching TLS-RPT records:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Define a POST route to capture screenshots for multiple domains and upload them to Google Drive
+router.post('/captureSS', async (req, res) => {
+  try {
+    const { domains, sharedEmails } = req.body;
+
+    // Array to store the results
+    const results = [];
+
+    // Iterate through the array of domains
+    for (const domain of domains) {
+      const url = `https://${domain}`; // Assuming all domains use HTTPS
+
+      // Capture the screenshot and upload it to Google Drive
+      const imageUrl = await captureScreenshotAndUpload(url, sharedEmails);
+
+      // Add the result to the array
+      results.push({ domain, imageUrl });
+    }
+
+    // Respond with the array of results
+    res.status(200).json({ results });
+  } catch (error) {
+    console.error('Route error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+router.post('/mtaSts', async (req, res) => {
+  const { domains } = req.body;
+  try {
+    const mtaStsResults = await Promise.all(
+      domains.map((domain) => fetchMtaSts(domain))
+    );
+
+    // Combine the domains and their MTA-STS results into an array of objects
+    const domainMtaStsPairs = domains.map((domain, index) => ({
+      domain,
+      mtaStsRecords: mtaStsResults[index],
+    }));
+
+    res.json({ domainMtaStsPairs });
+  } catch (error) {
+    console.error('Error fetching MTA-STS records:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
